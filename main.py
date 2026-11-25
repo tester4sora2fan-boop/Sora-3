@@ -13,7 +13,11 @@ app = FastAPI(title="Render -> Comfy Cloud API")
 COMFY_API_URL = "https://comfy.org"
 COMFY_API_KEY = os.getenv("COMFY_API_KEY")
 
-with open("Sora_3_Unofficial_Model_1_Z-BneL.json", "r", encoding="utf-8") as f:
+JSON_PATH = "Sora_3_Unofficial_Model_1_Z-BneL.json"
+if not os.path.exists(JSON_PATH):
+  raise RuntimeError(f"Arquivo {JSON_PATH} não encontrado na raiz do projeto!")
+
+with open(JSON_PATH, "r", encoding="utf-8") as f:
   BASE_WORKFLOW = json.load(f)
 
 NODE_VIDEO_PROMPT = 'insert:c63baf2405e3284e77dee601c78190ea:root:node:267:insert:c63baf2405e3284e77dee601c78190ea:root/definition:%22b94257db-cdc1-45d3-8913-ca61e782d9c1%22:node:266'
@@ -27,6 +31,11 @@ class RenderRequest(BaseModel):
   video_prompt: str
   audio_prompt: str
   seed: int | None = None
+
+
+@app.get("/")
+def health_check():
+  return {"status": "online", "api_key_configurada": bool(COMFY_API_KEY)}
 
 
 @app.post("/gerar-video")
@@ -45,7 +54,6 @@ def gerar_video(req: RenderRequest):
   workflow[NODE_VIDEO_SEED]["inputs"]["noise_seed"] = seed
   workflow[NODE_AUDIO_SEED]["inputs"]["seed"] = seed
 
-  # 1. Envia o workflow para a nuvem do ComfyUI
   res = requests.post(
       f"{COMFY_API_URL}/prompt", json={"prompt": workflow}, headers=headers
   )
@@ -54,7 +62,6 @@ def gerar_video(req: RenderRequest):
 
   prompt_id = res.json()["prompt_id"]
 
-  # 2. Aguarda a renderização concluir (polling simples)
   while True:
     status_res = requests.get(
         f"{COMFY_API_URL}/job/{prompt_id}/status", headers=headers
@@ -68,13 +75,12 @@ def gerar_video(req: RenderRequest):
       )
     time.sleep(3)
 
-  # 3. Obtém o arquivo de vídeo finalizado
   history = requests.get(
       f"{COMFY_API_URL}/history_v2/{prompt_id}", headers=headers
   ).json()
   outputs = history.get(prompt_id, {}).get("outputs", {})
   node_out = outputs.get(NODE_SAVE_VIDEO, {})
-  media = (node_out.get("videos") or node_out.get("gifs"))[0]
+  media = (node_out.get("videos") or node_out.get("gifs"))
 
   video_res = requests.get(
       f"{COMFY_API_URL}/view",
